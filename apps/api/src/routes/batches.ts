@@ -7,6 +7,7 @@ import { pageMeta, parsePagination } from "../lib/pagination.js";
 import { parseInput } from "../lib/validation.js";
 import { writeAudit } from "../lib/audit.js";
 import { getIdempotencyKey } from "../lib/idempotency.js";
+import { assertLocationNotFrozen } from "./stocktakes.js";
 
 type Query = Record<string, string | undefined>;
 type UnitRecord = { stock_unit: string; [key: string]: unknown };
@@ -99,7 +100,8 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
               b.total_cost::text AS "totalCost", b.currency, b.initial_color_name AS "initialColorName",
               b.initial_color_hex AS "initialColorHex", b.current_color_name AS "currentColorName",
               b.current_color_hex AS "currentColorHex", b.color_updated_at AS "colorUpdatedAt", b.status, b.notes,
-              b.created_at AS "createdAt", b.updated_at AS "updatedAt", b.version
+              b.created_at AS "createdAt", b.updated_at AS "updatedAt", b.version,
+              (SELECT s.id FROM stocktakes s WHERE s.location_id = b.location_id AND s.status = 'COUNTING' LIMIT 1) AS "activeStocktakeId"
          FROM batches b JOIN materials m ON m.id = b.material_id
          LEFT JOIN sources s ON s.id = b.source_id LEFT JOIN storage_locations l ON l.id = b.location_id
         WHERE b.id = $1`,
@@ -212,12 +214,14 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
       const old = before.rows[0];
       if (!old) throw new AppError(404, "NOT_FOUND", "批次不存在");
       if (old.status === "ARCHIVED") throw new AppError(409, "BATCH_ARCHIVED", "已归档批次不能修改");
+      await assertLocationNotFrozen(client, old.location_id as string | null);
       const material = await client.query("SELECT id FROM materials WHERE id = $1 AND archived_at IS NULL FOR SHARE", [old.material_id]);
       if (!material.rowCount) throw new AppError(409, "MATERIAL_ARCHIVED", "材料已归档，不能修改其批次");
       if (old.version !== input.version) throw new AppError(409, "VERSION_CONFLICT", "批次已被其他操作修改，请刷新后重试");
       if (input.locationId) {
         const location = await client.query("SELECT id FROM storage_locations WHERE id = $1 AND archived_at IS NULL FOR SHARE", [input.locationId]);
         if (!location.rowCount) throw new AppError(422, "INVALID_LOCATION", "存放位置不存在或已归档");
+        await assertLocationNotFrozen(client, input.locationId);
       }
       if ("expiryAt" in input && input.expiryAt) {
         const validExpiry = await client.query<{ valid: boolean }>(
@@ -266,6 +270,7 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
       const batch = batchResult.rows[0];
       if (!batch) throw new AppError(404, "NOT_FOUND", "批次不存在");
       if (batch.status === "ARCHIVED") throw new AppError(409, "BATCH_ARCHIVED", "已归档批次不能调整");
+      await assertLocationNotFrozen(client, batch.location_id as string | null);
       const material = await client.query("SELECT id FROM materials WHERE id = $1 AND archived_at IS NULL FOR SHARE", [batch.material_id]);
       if (!material.rowCount) throw new AppError(409, "MATERIAL_ARCHIVED", "材料已归档，不能调整其批次库存");
       if (batch.version !== input.version) throw new AppError(409, "VERSION_CONFLICT", "批次已被其他操作修改，请刷新后重试");
@@ -311,8 +316,9 @@ export async function batchRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string } }>("/batches/:id/archive", async (request) => {
     const user = (request as AuthenticatedRequest).authUser;
     return withTransaction(async (client) => {
-      const batch = await client.query<{ remaining_quantity: string }>("SELECT remaining_quantity FROM batches WHERE id = $1 FOR UPDATE", [request.params.id]);
+      const batch = await client.query<{ remaining_quantity: string; location_id: string | null }>("SELECT remaining_quantity, location_id FROM batches WHERE id = $1 FOR UPDATE", [request.params.id]);
       if (!batch.rows[0]) throw new AppError(404, "NOT_FOUND", "批次不存在");
+      await assertLocationNotFrozen(client, batch.rows[0].location_id);
       if (compareQuantities(batch.rows[0].remaining_quantity, "0") > 0) throw new AppError(409, "BATCH_HAS_STOCK", "批次仍有库存，不能归档");
       const result = await client.query("UPDATE batches SET status = 'ARCHIVED', version = version + 1 WHERE id = $1 RETURNING *", [request.params.id]);
       await writeAudit(client, { actorUserId: user.id, action: "ARCHIVE", entityType: "BATCH", entityId: request.params.id, afterData: result.rows[0], requestId: request.id });

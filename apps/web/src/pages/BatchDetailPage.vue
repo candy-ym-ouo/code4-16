@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { request, ApiError } from "@/lib/api";
@@ -18,6 +18,8 @@ const adjustmentVisible = ref(false);
 const colorVisible = ref(false);
 const adjustment = reactive({ direction: "OUT", quantity: "", unit: "", reason: "" });
 const colorForm = reactive({ projectId: "", changeType: "OTHER", afterColorName: "", afterColorHex: "", affectedQuantity: "", unit: "", occurredAt: localDateTimeValue(), environmentNotes: "", notes: "" });
+
+const frozenStocktakeId = computed<string | null>(() => batch.value?.activeStocktakeId ?? null);
 
 async function load() {
   loading.value = true;
@@ -139,12 +141,19 @@ onMounted(load);
       <header class="page-header">
         <div><h1>{{ batch.materialName }}</h1><p>{{ batch.batchCode || "无批次号" }} · {{ batch.sourceName || batch.sourceNote || "来源不明" }}</p></div>
         <div>
-          <el-button v-if="batch.status === 'ACTIVE'" @click="router.push({ path: '/consumptions', query: { batchId: batch.id, create: '1' } })">记录消耗</el-button>
-          <el-button v-if="batch.status !== 'ARCHIVED'" @click="openAdjustmentDialog()">库存调整</el-button>
+          <el-button v-if="batch.status === 'ACTIVE'" :disabled="!!frozenStocktakeId" @click="router.push({ path: '/consumptions', query: { batchId: batch.id, create: '1' } })">记录消耗</el-button>
+          <el-button v-if="batch.status !== 'ARCHIVED'" :disabled="!!frozenStocktakeId" @click="openAdjustmentDialog()">库存调整</el-button>
           <el-button v-if="batch.status !== 'ARCHIVED'" type="primary" @click="openColorDialog()">记录颜色变化</el-button>
-          <el-button v-if="batch.status === 'DEPLETED'" type="danger" plain @click="archive">归档</el-button>
+          <el-button v-if="batch.status === 'DEPLETED'" :disabled="!!frozenStocktakeId" type="danger" plain @click="archive">归档</el-button>
         </div>
       </header>
+      <el-alert v-if="frozenStocktakeId" type="warning" :closable="false" show-icon class="freeze-banner">
+        <template #title>
+          该批次所在库位正在盘点中，库存已冻结，
+          <router-link :to="`/stocktakes/${frozenStocktakeId}`">前往盘点任务</router-link>
+          完成或取消后才能调整、消耗或归档。
+        </template>
+      </el-alert>
       <section class="stat-grid">
         <article class="stat-card"><small>剩余数量</small><strong>{{ batch.remainingQuantity }} {{ batch.stockUnit }}</strong></article>
         <article class="stat-card"><small>初始数量</small><strong>{{ batch.initialQuantity }} {{ batch.stockUnit }}</strong></article>
@@ -218,3 +227,7 @@ onMounted(load);
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.freeze-banner { margin-bottom: 16px; }
+</style>

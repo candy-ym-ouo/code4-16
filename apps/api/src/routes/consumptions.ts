@@ -7,6 +7,7 @@ import { pageMeta, parsePagination } from "../lib/pagination.js";
 import { parseInput } from "../lib/validation.js";
 import { writeAudit } from "../lib/audit.js";
 import { getIdempotencyKey } from "../lib/idempotency.js";
+import { assertLocationNotFrozen } from "./stocktakes.js";
 
 type Query = Record<string, string | undefined>;
 
@@ -140,8 +141,9 @@ export async function consumptionRoutes(app: FastifyInstance): Promise<void> {
         remaining_quantity: string;
         stock_unit: string;
         status: string;
+        location_id: string | null;
       }>(
-        `SELECT b.id, b.material_id, m.name AS material_name, b.remaining_quantity, b.stock_unit, b.status
+        `SELECT b.id, b.material_id, m.name AS material_name, b.remaining_quantity, b.stock_unit, b.status, b.location_id
            FROM batches b JOIN materials m ON m.id = b.material_id
           WHERE b.id = $1 FOR UPDATE OF b`,
         [input.batchId]
@@ -149,6 +151,7 @@ export async function consumptionRoutes(app: FastifyInstance): Promise<void> {
       const batch = batchResult.rows[0];
       if (!batch) throw new AppError(422, "INVALID_BATCH", "批次不存在");
       if (batch.status === "ARCHIVED") throw new AppError(409, "BATCH_ARCHIVED", "已归档批次不能消耗");
+      await assertLocationNotFrozen(client, batch.location_id);
       const material = await client.query("SELECT id FROM materials WHERE id = $1 AND archived_at IS NULL FOR SHARE", [batch.material_id]);
       if (!material.rowCount) throw new AppError(409, "MATERIAL_ARCHIVED", "材料已归档，不能继续消耗");
 
@@ -218,9 +221,10 @@ export async function consumptionRoutes(app: FastifyInstance): Promise<void> {
         stock_unit: string;
         status: string;
         remaining_quantity: string;
+        location_id: string | null;
       }>(
         `SELECT c.id, c.batch_id, b.material_id, c.total_quantity, c.stock_unit, c.status,
-                b.remaining_quantity, b.status AS batch_status
+                b.remaining_quantity, b.status AS batch_status, b.location_id
            FROM consumptions c JOIN batches b ON b.id = c.batch_id
           WHERE c.id = $1 FOR UPDATE OF c, b`,
         [request.params.id]
@@ -228,6 +232,7 @@ export async function consumptionRoutes(app: FastifyInstance): Promise<void> {
       const consumption = result.rows[0];
       if (!consumption) throw new AppError(404, "NOT_FOUND", "消耗记录不存在");
       if (consumption.status !== "ACTIVE") throw new AppError(409, "ALREADY_REVERSED", "该消耗已经撤销");
+      await assertLocationNotFrozen(client, consumption.location_id);
       const material = await client.query("SELECT id FROM materials WHERE id = $1 AND archived_at IS NULL FOR SHARE", [consumption.material_id]);
       if (!material.rowCount) throw new AppError(409, "MATERIAL_ARCHIVED", "材料已归档，不能撤销消耗恢复库存");
       const before = consumption.remaining_quantity;

@@ -18,9 +18,17 @@ export const movementTypes = [
   "CONSUMPTION",
   "ADJUSTMENT_IN",
   "ADJUSTMENT_OUT",
-  "REVERSAL"
+  "REVERSAL",
+  "STOCKTAKE_IN",
+  "STOCKTAKE_OUT"
 ] as const;
 export type MovementType = (typeof movementTypes)[number];
+
+export const stocktakeStatuses = ["COUNTING", "COMPLETED", "CANCELLED"] as const;
+export type StocktakeStatus = (typeof stocktakeStatuses)[number];
+
+export const stocktakeLineStatuses = ["PENDING", "COUNTED", "RECONCILED"] as const;
+export type StocktakeLineStatus = (typeof stocktakeLineStatuses)[number];
 
 export const projectStatuses = ["PLANNED", "IN_PROGRESS", "COMPLETED", "ARCHIVED"] as const;
 export type ProjectStatus = (typeof projectStatuses)[number];
@@ -108,6 +116,23 @@ export function compareQuantities(left: string, right: string): number {
   const leftScaled = toScaled(left);
   const rightScaled = toScaled(right);
   return leftScaled === rightScaled ? 0 : leftScaled > rightScaled ? 1 : -1;
+}
+
+export type VarianceDirection = "GAIN" | "LOSS" | "MATCH";
+
+/**
+ * 盘点差异核销的唯一判定口径：差异 = 实盘 - 账面。
+ * GAIN（盘盈）实盘大于账面，LOSS（盘亏）实盘小于账面，MATCH 完全一致。
+ * 提交时服务端用它重算，绝不信任前端上报的差异。
+ */
+export function computeVariance(bookQuantity: string, countedQuantity: string): {
+  direction: VarianceDirection;
+  variance: string;
+} {
+  const varianceScaled = toScaled(countedQuantity) - toScaled(bookQuantity);
+  const variance = fromScaled(varianceScaled >= 0n ? varianceScaled : -varianceScaled);
+  if (varianceScaled === 0n) return { direction: "MATCH", variance: "0.000000" };
+  return { direction: varianceScaled > 0n ? "GAIN" : "LOSS", variance };
 }
 
 export const setupSchema = z.object({
@@ -250,6 +275,46 @@ export const reverseConsumptionSchema = z.object({
 
 export const projectStatusSchema = z.object({
   status: z.enum(projectStatuses),
+  version: z.number().int().positive()
+});
+
+export const stocktakeCreateSchema = z.object({
+  locationId: z.string().uuid(),
+  notes: z.string().trim().max(5000).nullable().optional()
+});
+
+export const stocktakeNotePatchSchema = z.object({
+  notes: z.string().trim().max(5000).nullable(),
+  version: z.number().int().positive()
+});
+
+// 逐批录入实盘数：单批或成批。
+export const stocktakeCountItemSchema = z.object({
+  batchId: z.string().uuid(),
+  countedQuantity: decimalQuantity
+});
+
+export const stocktakeCountSchema = z.object({
+  version: z.number().int().positive(),
+  items: z.array(stocktakeCountItemSchema).min(1).max(100)
+}).superRefine((value, ctx) => {
+  const seen = new Set<string>();
+  value.items.forEach((item, index) => {
+    if (seen.has(item.batchId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "batchId"], message: "同一批次在一次录入中只能出现一次" });
+    }
+    seen.add(item.batchId);
+  });
+});
+
+// 提交核销需要乐观锁版本；差异由服务端重算，请求体不携带差异。
+export const stocktakeSubmitSchema = z.object({
+  version: z.number().int().positive(),
+  notes: z.string().trim().max(5000).nullable().optional()
+});
+
+export const stocktakeCancelSchema = z.object({
+  reason: z.string().trim().min(3).max(1000),
   version: z.number().int().positive()
 });
 

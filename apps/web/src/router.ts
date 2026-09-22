@@ -22,6 +22,8 @@ const router = createRouter({
     { path: "/projects/:id/edit", component: () => import("@/pages/ProjectFormPage.vue") },
     { path: "/projects/:id", component: () => import("@/pages/ProjectDetailPage.vue") },
     { path: "/consumptions", component: () => import("@/pages/ConsumptionsPage.vue") },
+    { path: "/stocktakes", component: () => import("@/pages/StocktakesPage.vue") },
+    { path: "/stocktakes/:id", component: () => import("@/pages/StocktakeDetailPage.vue") },
     { path: "/settings", component: () => import("@/pages/SettingsPage.vue") },
     { path: "/audit", component: () => import("@/pages/AuditPage.vue") },
     { path: "/:pathMatch(.*)*", redirect: "/" }

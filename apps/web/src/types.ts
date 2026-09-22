@@ -111,6 +111,43 @@ export type Consumption = {
   reversalReason: string | null;
 };
 
+export type StocktakeLine = {
+  id: string;
+  stocktakeId: string;
+  batchId: string;
+  batchCode: string | null;
+  materialId: string;
+  materialName: string;
+  bookQuantity: string;
+  countedQuantity: string | null;
+  varianceQuantity: string | null;
+  stockUnit: string;
+  status: string;
+  countedAt: string | null;
+  reconciledAt: string | null;
+  movementType: string | null;
+};
+
+export type Stocktake = {
+  id: string;
+  locationId: string;
+  locationName: string;
+  status: string;
+  notes: string | null;
+  frozenAt: string;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+  lineCount?: number;
+  pendingCount?: number;
+  varianceCount?: number;
+  reconciledVarianceTotal?: string;
+  lines?: StocktakeLine[];
+};
+
 export const craftTypeLabels: Record<string, string> = {
   DYEING: "染布",
   WOODWORKING: "木工",
@@ -127,7 +164,12 @@ export const statusLabels: Record<string, string> = {
   PLANNED: "计划中",
   IN_PROGRESS: "进行中",
   COMPLETED: "已完成",
-  REVERSED: "已撤销"
+  REVERSED: "已撤销",
+  COUNTING: "盘点中",
+  CANCELLED: "已取消",
+  PENDING: "待盘点",
+  COUNTED: "已录入",
+  RECONCILED: "已核销"
 };
 
 export const movementLabels: Record<string, string> = {
@@ -136,5 +178,7 @@ export const movementLabels: Record<string, string> = {
   CONSUMPTION: "材料消耗",
   ADJUSTMENT_IN: "盘增",
   ADJUSTMENT_OUT: "盘减",
-  REVERSAL: "撤销恢复"
+  REVERSAL: "撤销恢复",
+  STOCKTAKE_IN: "盘盈入库",
+  STOCKTAKE_OUT: "盘亏出库"
 };

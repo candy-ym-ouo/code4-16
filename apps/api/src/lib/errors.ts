@@ -27,7 +27,7 @@ export function isClientError(error: unknown): boolean {
   const metadata = errorMetadata(error);
   if (typeof metadata.statusCode === "number" && metadata.statusCode >= 400 && metadata.statusCode < 500) return true;
   return [
-    "23505", "23503", "23502", "23514", "23P01", "40001", "40P01",
+    "23505", "23503", "23502", "23514", "23P01", "40001", "40P01", "P0999",
     "22001", "22003", "22P02", "22007", "22008", "22023"
   ].includes(metadata.code ?? "");
 }
@@ -53,6 +53,30 @@ export function sendError(reply: FastifyReply, error: unknown, requestId: string
       error: {
         code: "CONCURRENT_TRANSACTION",
         message: "数据正在被其他操作修改，请重试",
+        fieldErrors: {},
+        requestId
+      }
+    });
+    return;
+  }
+
+  if (databaseCode === "P0999") {
+    reply.status(409).send({
+      error: {
+        code: "LOCATION_FROZEN",
+        message: "该库位正在盘点中已冻结，盘点提交或取消后才能修改库存",
+        fieldErrors: {},
+        requestId
+      }
+    });
+    return;
+  }
+
+  if (databaseCode === "P0998") {
+    reply.status(409).send({
+      error: {
+        code: "STOCKTAKE_RULE_CONFLICT",
+        message: "盘点任务状态冲突或盘点批次不属于该库位",
         fieldErrors: {},
         requestId
       }

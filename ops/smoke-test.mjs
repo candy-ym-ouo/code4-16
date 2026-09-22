@@ -155,11 +155,61 @@ assert(afterReversal.data.movements[0].type === "REVERSAL", "Reversal movement w
 const search = await call(`/materials?${new URLSearchParams({ q: `Smoke Material ${suffix}`, craftType: "GENERAL", color: "Smoke Brown", stockState: "in_stock" })}`);
 assert(search.meta.total >= 1, "Material search did not find the smoke-test material");
 
+// ---- Stocktake: freeze a location, count, reconcile, and prove idempotent submit ----
+const location = await call("/locations", { method: "POST", body: { name: `Smoke Shelf ${suffix}` } });
+const batchBeforeMove = await call(`/batches/${batch.id}`);
+await call(`/batches/${batch.id}`, { method: "PATCH", body: { locationId: location.data.id, version: batchBeforeMove.data.version } });
+
+const stocktake = await call("/stocktakes", { method: "POST", body: { locationId: location.data.id, notes: "Smoke stocktake" } });
+assert(stocktake.data.status === "COUNTING", "Stocktake was not created in COUNTING state");
+const detail = await call(`/stocktakes/${stocktake.data.id}`);
+assert(detail.data.lines.length === 1 && detail.data.lines[0].bookQuantity === "1000.000000", "Stocktake snapshot book quantity is incorrect");
+
+// A normal inventory write while the location is frozen must be rejected.
+const frozenAttempt = await callWithStatus(`/batches/${batch.id}/adjustments`, {
+  method: "POST",
+  headers: { "idempotency-key": `smoke-frozen-${suffix}` },
+  body: { direction: "OUT", quantity: "1", unit: "g", reason: "Should be blocked while frozen", version: 1 }
+}).catch((error) => {
+  const match = /-> (\d+) (.*)$/.exec(error.message);
+  return { frozenBlocked: match?.[1] === "409" && match?.[2].includes("LOCATION_FROZEN") };
+});
+assert(frozenAttempt?.frozenBlocked === true, "Adjustment during freeze was not rejected with LOCATION_FROZEN");
+
+await call(`/stocktakes/${stocktake.data.id}/counts`, {
+  method: "POST",
+  body: { version: stocktake.data.version, items: [{ batchId: batch.id, countedQuantity: "900" }] }
+});
+
+const submitKey = `smoke-stocktake-${suffix}`;
+const firstSubmit = await call(`/stocktakes/${stocktake.data.id}/submit`, {
+  method: "POST",
+  headers: { "idempotency-key": submitKey },
+  body: { version: stocktake.data.version + 1 }
+});
+assert(firstSubmit.data.idempotent === false && firstSubmit.data.lossCount === 1, "First stocktake submit did not reconcile one loss");
+
+// Repeating the submit with the same Idempotency-Key must replay, never adjust twice.
+const replaySubmit = await call(`/stocktakes/${stocktake.data.id}/submit`, {
+  method: "POST",
+  headers: { "idempotency-key": submitKey },
+  body: { version: stocktake.data.version + 1 }
+});
+assert(replaySubmit.data.idempotent === true, "Duplicate stocktake submit was not treated as idempotent replay");
+
+const afterStocktake = await call(`/batches/${batch.id}`);
+assert(afterStocktake.data.remainingQuantity === "900.000000", "Batch balance after stocktake reconciliation is incorrect");
+const stocktakeOutMovements = afterStocktake.data.movements.filter((movement) => movement.type === "STOCKTAKE_OUT");
+assert(stocktakeOutMovements.length === 1, "Duplicate submit created a second stocktake movement");
+const completedStocktake = await call(`/stocktakes/${stocktake.data.id}`);
+assert(completedStocktake.data.status === "COMPLETED", "Stocktake was not marked COMPLETED");
+
 console.log(JSON.stringify({
   result: "PASS",
   sourceId: source.data.id,
   materialId: material.data.id,
   batchId: batch.id,
   projectId: project.data.id,
-  consumptionId: consumption.id
+  consumptionId: consumption.id,
+  stocktakeId: stocktake.data.id
 }, null, 2));
