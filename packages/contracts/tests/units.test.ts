@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addQuantities,
   compareQuantities,
+  compareSignedQuantities,
   convertQuantity,
   moneyAmount,
   positiveQuantity,
@@ -31,5 +32,15 @@ describe("fixed decimal quantity operations", () => {
     expect(positiveQuantity.safeParse("0.000001").success).toBe(true);
     expect(moneyAmount.safeParse("12.34").success).toBe(true);
     expect(moneyAmount.safeParse("12.345").success).toBe(false);
+  });
+
+  it("compares signed differences produced by subtraction", () => {
+    const shortage = subtractQuantities("950.000000", "1000.000000");
+    expect(shortage).toBe("-50.000000");
+    expect(compareSignedQuantities(shortage, "0")).toBe(-1);
+    expect(compareSignedQuantities("25.500000", "0")).toBe(1);
+    expect(compareSignedQuantities("0.000000", "0")).toBe(0);
+    expect(compareSignedQuantities("-50.000000", "-25.000000")).toBe(-1);
+    expect(compareSignedQuantities("-25.000000", "25.000000")).toBe(-1);
   });
 });

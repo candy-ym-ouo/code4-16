@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchCreateSchema, colorChangeInputSchema, consumptionInputSchema, convertQuantity } from "@handcraft/contracts";
+import { batchCreateSchema, colorChangeInputSchema, consumptionInputSchema, convertQuantity, inventoryCountCreateSchema, inventoryCountEntrySchema } from "@handcraft/contracts";
 
 describe("API business validation contracts", () => {
   it("normalizes a valid batch payload", () => {
@@ -39,5 +39,23 @@ describe("API business validation contracts", () => {
   it("keeps inventory units in compatible families", () => {
     expect(convertQuantity("2.5", "l", "ml")).toBe("2500.000000");
     expect(() => convertQuantity("2.5", "l", "kg")).toThrow();
+  });
+
+  it("requires at least one location for an inventory count", () => {
+    expect(inventoryCountCreateSchema.safeParse({ name: "九月盘点", locationIds: [] }).success).toBe(false);
+    const result = inventoryCountCreateSchema.safeParse({
+      name: "九月盘点",
+      locationIds: ["00000000-0000-0000-0000-000000000001"],
+      notes: null
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("only accepts non-negative decimal counted quantities", () => {
+    expect(inventoryCountEntrySchema.safeParse({ countedQuantity: "0" }).success).toBe(true);
+    expect(inventoryCountEntrySchema.safeParse({ countedQuantity: "12.123456" }).success).toBe(true);
+    expect(inventoryCountEntrySchema.safeParse({ countedQuantity: "-1" }).success).toBe(false);
+    expect(inventoryCountEntrySchema.safeParse({ countedQuantity: "1.1234567" }).success).toBe(false);
+    expect(inventoryCountEntrySchema.safeParse({ countedQuantity: "abc" }).success).toBe(false);
   });
 });

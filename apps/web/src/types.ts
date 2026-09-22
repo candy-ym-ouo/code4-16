@@ -111,6 +111,48 @@ export type Consumption = {
   reversalReason: string | null;
 };
 
+export type InventoryCount = {
+  id: string;
+  name: string;
+  status: string;
+  notes: string | null;
+  startedByName: string;
+  locationCount: number;
+  itemCount: number;
+  countedItemCount: number;
+  differenceCount: number;
+  createdAt: string;
+  submittedAt: string | null;
+  cancelledAt: string | null;
+  version: number;
+};
+
+export type InventoryCountLocation = {
+  id: string;
+  name: string;
+};
+
+export type InventoryCountItem = {
+  id: string;
+  batchId: string;
+  batchCode: string | null;
+  materialId: string;
+  materialName: string;
+  materialCode: string | null;
+  locationName: string | null;
+  batchStatus: string;
+  systemQuantity: string;
+  countedQuantity: string | null;
+  differenceQuantity: string | null;
+  stockUnit: string;
+  countedAt: string | null;
+};
+
+export type InventoryCountDetail = Omit<InventoryCount, "locationCount" | "itemCount" | "countedItemCount" | "differenceCount"> & {
+  locations: InventoryCountLocation[];
+  items: InventoryCountItem[];
+};
+
 export const craftTypeLabels: Record<string, string> = {
   DYEING: "染布",
   WOODWORKING: "木工",
@@ -137,4 +179,10 @@ export const movementLabels: Record<string, string> = {
   ADJUSTMENT_IN: "盘增",
   ADJUSTMENT_OUT: "盘减",
   REVERSAL: "撤销恢复"
+};
+
+export const inventoryCountStatusLabels: Record<string, string> = {
+  COUNTING: "盘点中",
+  COMPLETED: "已核销",
+  CANCELLED: "已取消"
 };

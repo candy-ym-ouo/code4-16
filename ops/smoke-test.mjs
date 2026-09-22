@@ -155,11 +155,54 @@ assert(afterReversal.data.movements[0].type === "REVERSAL", "Reversal movement w
 const search = await call(`/materials?${new URLSearchParams({ q: `Smoke Material ${suffix}`, craftType: "GENERAL", color: "Smoke Brown", stockState: "in_stock" })}`);
 assert(search.meta.total >= 1, "Material search did not find the smoke-test material");
 
+const countLocation = await call("/locations", { method: "POST", body: { name: `Smoke Count Shelf ${suffix}` } });
+const countBatch = await call("/batches", {
+  method: "POST",
+  body: {
+    materialId: material.data.id,
+    batchCode: `BC-${suffix}`,
+    sourceId: source.data.id,
+    locationId: countLocation.data.id,
+    receivedAt: new Date().toISOString().slice(0, 10),
+    initialQuantity: "200",
+    entryUnit: "g"
+  }
+});
+const inventoryCount = await call("/inventory-counts", {
+  method: "POST",
+  body: { name: `Smoke Count ${suffix}`, locationIds: [countLocation.data.id] }
+});
+assert(inventoryCount.data.itemCount === 1, "Inventory count did not snapshot the located batch");
+const frozenResponse = await fetch(`${baseUrl}/api/v1/consumptions`, {
+  method: "POST",
+  headers: { cookie, "content-type": "application/json" },
+  body: JSON.stringify({ projectId: project.data.id, batchId: countBatch.data.id, usedQuantity: "10", wasteQuantity: "0", unit: "g" })
+});
+const frozenPayload = await frozenResponse.json();
+assert(frozenResponse.status === 409 && frozenPayload.error?.code === "LOCATION_FROZEN", "Frozen location did not block consumption");
+const countItem = (await call(`/inventory-counts/${inventoryCount.data.id}`)).data.items[0];
+await call(`/inventory-counts/${inventoryCount.data.id}/items/${countItem.id}`, { method: "PUT", body: { countedQuantity: "180" } });
+const [firstSubmit, repeatedSubmit] = await Promise.all([
+  call(`/inventory-counts/${inventoryCount.data.id}/submit`, { method: "POST" }),
+  call(`/inventory-counts/${inventoryCount.data.id}/submit`, { method: "POST" })
+]);
+assert(firstSubmit.data.adjustedCount === 1 || repeatedSubmit.data.adjustedCount === 1, "Inventory count submit did not write off the difference");
+const countBatchAfter = await call(`/batches/${countBatch.data.id}`);
+assert(countBatchAfter.data.remainingQuantity === "180.000000", "Batch balance after count write-off is incorrect");
+const writeOffMovements = countBatchAfter.data.movements.filter((movement) => movement.referenceType === "INVENTORY_COUNT");
+assert(writeOffMovements.length === 1 && writeOffMovements[0].signedQuantity === "-20.000000", "Repeated submit created a second write-off movement");
+const unfrozenConsumption = await call("/consumptions", {
+  method: "POST",
+  body: { projectId: project.data.id, batchId: countBatch.data.id, usedQuantity: "30", wasteQuantity: "0", unit: "g" }
+});
+assert(unfrozenConsumption.data.totalQuantity === "30.000000", "Location was not unfrozen after count completion");
+
 console.log(JSON.stringify({
   result: "PASS",
   sourceId: source.data.id,
   materialId: material.data.id,
   batchId: batch.id,
   projectId: project.data.id,
-  consumptionId: consumption.id
+  consumptionId: consumption.id,
+  inventoryCountId: inventoryCount.data.id
 }, null, 2));

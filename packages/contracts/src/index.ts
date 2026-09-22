@@ -25,6 +25,9 @@ export type MovementType = (typeof movementTypes)[number];
 export const projectStatuses = ["PLANNED", "IN_PROGRESS", "COMPLETED", "ARCHIVED"] as const;
 export type ProjectStatus = (typeof projectStatuses)[number];
 
+export const inventoryCountStatuses = ["COUNTING", "COMPLETED", "CANCELLED"] as const;
+export type InventoryCountStatus = (typeof inventoryCountStatuses)[number];
+
 export const colorChangeTypes = [
   "OXIDATION",
   "DYE_BATH",
@@ -108,6 +111,14 @@ export function compareQuantities(left: string, right: string): number {
   const leftScaled = toScaled(left);
   const rightScaled = toScaled(right);
   return leftScaled === rightScaled ? 0 : leftScaled > rightScaled ? 1 : -1;
+}
+
+export function compareSignedQuantities(left: string, right: string): number {
+  const leftNegative = left.startsWith("-");
+  const rightNegative = right.startsWith("-");
+  if (leftNegative !== rightNegative) return leftNegative ? -1 : 1;
+  const magnitude = compareQuantities(left.replace(/^-/, ""), right.replace(/^-/, ""));
+  return leftNegative ? -magnitude : magnitude;
 }
 
 export const setupSchema = z.object({
@@ -246,6 +257,16 @@ export const colorChangePatchSchema = z.object({
 
 export const reverseConsumptionSchema = z.object({
   reason: z.string().trim().min(3).max(1000)
+});
+
+export const inventoryCountCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  locationIds: z.array(z.string().uuid()).min(1, "至少选择一个盘点库位").max(100),
+  notes: z.string().trim().max(5000).nullable().optional()
+});
+
+export const inventoryCountEntrySchema = z.object({
+  countedQuantity: decimalQuantity
 });
 
 export const projectStatusSchema = z.object({
